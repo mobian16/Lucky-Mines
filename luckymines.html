@@ -1,0 +1,400 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Lucky Mines Reveal Mode</title>
+  <style>
+    body {
+      background:#111;
+      color:white;
+      text-align:center;
+      font-family:sans-serif;
+      overflow-x: hidden;
+    }
+    h1 { margin-bottom: 10px; }
+    .stats { margin-bottom: 10px; font-size: 18px; }
+    .controls { margin-bottom: 10px; }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(5, 60px);
+      gap: 8px;
+      justify-content: center;
+      margin-top: 20px;
+    }
+    .tile {
+      width: 60px;
+      height: 60px;
+      background: #333;
+      border: 2px solid #666;
+      cursor: pointer;
+      transition: border 0.2s ease;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: bold;
+      font-size: 16px;
+    }
+    .tile.diamond { border-color: cyan; color: cyan; }
+    .tile.bomb { border-color: red; color: red; }
+    .tile.preselected { border: 2px solid limegreen; box-shadow: 0 0 6px limegreen; }
+    input[type="number"] {
+      width: 80px;
+      text-align: center;
+      margin: 5px;
+    }
+    button {
+      margin: 5px;
+      padding: 8px 12px;
+      background: #333;
+      color: white;
+      border: 1px solid #555;
+      cursor: pointer;
+    }
+    button.green {
+      background: #2ecc71;
+      color: black;
+      font-weight: bold;
+    }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .payout-message {
+      margin-top: 10px;
+      font-size: 20px;
+      font-weight: bold;
+      color: gold;
+    }
+    .slider-container { margin: 15px 0; }
+    .slider-container input[type="range"] { width: 250px; }
+    .falling-container {
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+      overflow: hidden;
+      z-index: 9999;
+    }
+    .falling {
+      position: absolute;
+      font-size: 24px;
+      animation: fall 2.5s linear forwards;
+    }
+    @keyframes fall {
+      0% { transform: translateY(-50px) rotate(0deg); opacity: 1; }
+      100% { transform: translateY(100vh) rotate(360deg); opacity: 0; }
+    }
+  </style>
+</head>
+<body>
+  <h1>💎 Lucky Mines!</h1>
+
+  <div class="stats">
+    💰 Credits: <span id="credits">1000</span> |
+    📈 Multiplier: <strong>x<span id="multiplier">1.0</span></strong>
+  </div>
+
+  <!-- Bomb slider -->
+  <div class="slider-container">
+    Bombs: <span id="bombCountLabel">1</span><br>
+    <input type="range" id="bombSlider" min="1" max="10" value="1">
+    <br><small>Higher bombs = higher risk = higher multiplier increase</small>
+  </div>
+
+  <div class="controls">
+    Bet: <input type="number" id="betAmount" value="50" min="50" step="10">
+    <button id="startRound">▶️ PLAY</button>
+    <button id="cashOut" disabled>💵 Cash Out</button>
+    <button id="allIn" class="green">🤑 ALL IN</button>
+    <button id="replenish">🔄 Replenish Credits</button><br>
+    <button id="selectMode">🎯 Select Auto Picks</button>
+    <button id="confirmPicks" disabled>✅ Confirm Picks</button>
+    <button id="clearPicks" disabled>❌ Unselect All</button>
+  </div>
+
+  <div id="grid" class="grid"></div>
+  <div id="payoutMessage" class="payout-message"></div>
+
+  <div id="fallingContainer" class="falling-container"></div>
+
+
+<!--wverything above this is html-->
+
+
+<!--everything under is javascript mb lol-->
+
+  <script>
+    const grid = document.getElementById('grid');
+    const startRoundBtn = document.getElementById('startRound');
+    const cashOutBtn = document.getElementById('cashOut');
+    const allInBtn = document.getElementById('allIn');
+    const replenishBtn = document.getElementById('replenish');
+    const creditsEl = document.getElementById('credits');
+    const multiplierEl = document.getElementById('multiplier');
+    const betInput = document.getElementById('betAmount');
+    const selectModeBtn = document.getElementById('selectMode');
+    const confirmPicksBtn = document.getElementById('confirmPicks');
+    const clearPicksBtn = document.getElementById('clearPicks');
+    const payoutMsg = document.getElementById('payoutMessage');
+    const fallingContainer = document.getElementById('fallingContainer');
+    const bombSlider = document.getElementById('bombSlider');
+    const bombCountLabel = document.getElementById('bombCountLabel');
+
+    let tiles = [];
+    let bombIndexes = [];
+    let gameActive = false;
+    let canCashOut = false;
+    let credits = 1000;
+    let bet = 50;
+    let multiplier = 1.0;
+    let revealedTiles = 0;
+    let bombCount = parseInt(bombSlider.value);
+    let multiplierStep = 0.1;
+
+    // Auto-pick state
+    let selectionMode = false;
+    let preselectedTiles = [];
+    let confirmedAutoPicks = [];
+
+    // Build Grid
+    for (let i = 0; i < 25; i++) {
+      const tile = document.createElement('div');
+      tile.classList.add('tile');
+      tile.addEventListener('click', () => {
+        if (selectionMode && !gameActive) {
+          togglePreselect(i, tile);
+        } else if (gameActive) {
+          handleTileClick(i, tile);
+        }
+      });
+      grid.appendChild(tile);
+      tiles.push(tile);
+    }
+
+    function updateMultiplierStep() {
+      multiplierStep = 0.1 + (bombCount / 10) * 0.4;
+    }
+
+    bombSlider.addEventListener('input', () => {
+      bombCount = parseInt(bombSlider.value);
+      bombCountLabel.textContent = bombCount;
+      updateMultiplierStep();
+    });
+
+    function handleTileClick(index, tile) {
+      if (!gameActive) return;
+      if (tile.classList.contains('diamond') || tile.classList.contains('bomb')) return;
+
+      if (bombIndexes.includes(index)) {
+        tile.textContent = "💣 BOOM!";
+        tile.classList.add('bomb');
+        loseRound();
+      } else {
+        tile.textContent = "💎";
+        tile.classList.add('diamond');
+        revealedTiles++;
+        multiplier += multiplierStep;
+        multiplierEl.textContent = multiplier.toFixed(1);
+        if (!canCashOut) {
+          canCashOut = true;
+          cashOutBtn.disabled = false;
+        }
+        const totalSafe = 25 - bombIndexes.length;
+        if (revealedTiles === totalSafe) {
+          winRound();
+        }
+      }
+    }
+
+    function resetGrid() {
+      tiles.forEach(tile => {
+        tile.textContent = "";
+        tile.className = "tile";
+        if (confirmedAutoPicks.includes(tiles.indexOf(tile))) {
+          tile.classList.add("preselected");
+        }
+      });
+      payoutMsg.textContent = "";
+    }
+
+    function startRound(customBet = null) {
+      bet = customBet !== null ? customBet : parseInt(betInput.value);
+      if (isNaN(bet) || bet < 50) bet = 50;
+      if (credits < bet) {
+        alert("❌ Not enough credits! Replenish?");
+        return;
+      }
+      credits -= bet;
+      creditsEl.textContent = credits;
+      resetGrid();
+      generateBombs();
+      gameActive = true;
+      canCashOut = false;
+      cashOutBtn.disabled = true;
+      revealedTiles = 0;
+      multiplier = 1.0;
+      multiplierEl.textContent = multiplier.toFixed(1);
+
+      if (confirmedAutoPicks.length > 0) {
+        setTimeout(() => {
+          let safe = true;
+          for (let idx of confirmedAutoPicks) {
+            if (!gameActive) { safe = false; break; }
+            handleTileClick(idx, tiles[idx]);
+            if (bombIndexes.includes(idx)) { safe = false; break; }
+          }
+          if (safe && confirmedAutoPicks.length > 0 && gameActive) {
+            cashOut();
+          }
+        }, 300);
+      }
+    }
+
+    function generateBombs() {
+      bombIndexes = [];
+      const available = Array.from({length:25}, (_,i)=>i);
+      for (let i = 0; i < bombCount; i++) {
+        const randIndex = Math.floor(Math.random() * available.length);
+        bombIndexes.push(available[randIndex]);
+        available.splice(randIndex, 1);
+      }
+    }
+
+    // ✅ NEW: reveal all after round ends
+    function revealAllTiles() {
+      tiles.forEach((tile, i) => {
+        if (!tile.classList.contains('diamond') && !tile.classList.contains('bomb')) {
+          if (bombIndexes.includes(i)) {
+            tile.textContent = "💣";
+            tile.classList.add('bomb');
+          } else {
+            tile.textContent = "💎";
+            tile.classList.add('diamond');
+          }
+        }
+      });
+    }
+
+    // ✅ NEW: delay after round
+    function endRoundDelay() {
+      revealAllTiles();
+      disableControls(true);
+      setTimeout(() => {
+        resetGrid();
+        disableControls(false);
+      }, 3000);
+    }
+
+    function disableControls(state) {
+      startRoundBtn.disabled = state;
+      allInBtn.disabled = state;
+      bombSlider.disabled = state;
+      selectModeBtn.disabled = state;
+    }
+
+    function loseRound() {
+      gameActive = false;
+      cashOutBtn.disabled = true;
+      payoutMsg.textContent = `💥 BOOM! You lost ${bet} credits.`;
+      spawnFalling("💣", 15);
+      endRoundDelay(); // ✅ wait before next round
+    }
+
+    function winRound() {
+      const payout = Math.floor(bet * multiplier);
+      credits += payout;
+      creditsEl.textContent = credits;
+      payoutMsg.textContent = `🎉 You cleared all diamonds & won ${payout} credits!`;
+      spawnFalling("💵", 20);
+      gameActive = false;
+      cashOutBtn.disabled = true;
+      endRoundDelay(); // ✅ wait before next round
+    }
+
+    function cashOut() {
+      if (!gameActive || !canCashOut) return;
+      const payout = Math.floor(bet * multiplier);
+      credits += payout;
+      creditsEl.textContent = credits;
+      payoutMsg.textContent = `💵 Cashed out for ${payout} credits (x${multiplier.toFixed(1)})`;
+      spawnFalling("💵", 15);
+      gameActive = false;
+      cashOutBtn.disabled = true;
+      endRoundDelay(); // ✅ wait before next round
+    }
+
+    function replenishCredits() {
+      if (credits < 1000) {
+        credits = 1000;
+        creditsEl.textContent = credits;
+        alert("✅ Credits replenished back to 1000!");
+      } else alert("You still have enough credits!");
+    }
+
+    function goAllIn() {
+      if (credits <= 0) {
+        alert("❌ No credits left! Replenish first.");
+        return;
+      }
+      startRound(credits);
+    }
+
+    selectModeBtn.addEventListener('click', () => {
+      if (gameActive) {
+        alert("Can't select while a round is active!");
+        return;
+      }
+      selectionMode = !selectionMode;
+      alert(selectionMode ? "✅ Selection mode ON" : "❌ Selection mode OFF");
+    });
+
+    function togglePreselect(index, tile) {
+      if (preselectedTiles.includes(index)) {
+        preselectedTiles = preselectedTiles.filter(i => i !== index);
+        tile.classList.remove('preselected');
+      } else {
+        preselectedTiles.push(index);
+        tile.classList.add('preselected');
+      }
+      confirmPicksBtn.disabled = preselectedTiles.length === 0;
+      clearPicksBtn.disabled = preselectedTiles.length === 0 && confirmedAutoPicks.length === 0;
+    }
+
+    confirmPicksBtn.addEventListener('click', () => {
+      confirmedAutoPicks = [...preselectedTiles];
+      alert(`✅ Saved ${confirmedAutoPicks.length} auto picks!`);
+      preselectedTiles = [];
+      selectionMode = false;
+      confirmPicksBtn.disabled = true;
+      clearPicksBtn.disabled = confirmedAutoPicks.length === 0;
+    });
+
+    clearPicksBtn.addEventListener('click', () => {
+      preselectedTiles = [];
+      confirmedAutoPicks = [];
+      tiles.forEach(tile => tile.classList.remove("preselected"));
+      alert("❌ All auto-picks cleared!");
+      clearPicksBtn.disabled = true;
+    });
+
+    function spawnFalling(symbol, count) {
+      for (let i = 0; i < count; i++) {
+        const span = document.createElement("span");
+        span.textContent = symbol;
+        span.classList.add("falling");
+        span.style.left = Math.random() * 100 + "vw";
+        span.style.animationDuration = (2 + Math.random()) + "s";
+        fallingContainer.appendChild(span);
+        setTimeout(() => span.remove(), 2500);
+      }
+    }
+
+    updateMultiplierStep();
+    bombCountLabel.textContent = bombCount;
+
+    startRoundBtn.addEventListener('click', () => startRound());
+    cashOutBtn.addEventListener('click', cashOut);
+    replenishBtn.addEventListener('click', replenishCredits);
+    allInBtn.addEventListener('click', goAllIn);
+  </script>
+</body>
+</html>
