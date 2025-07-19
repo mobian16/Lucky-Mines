@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <title>Lucky Mines Reveal Mode</title>
+  <title>Lucky Mines Reveal Mode + High Score</title>
   <style>
     body {
       background:#111;
@@ -86,11 +86,12 @@
   </style>
 </head>
 <body>
-  <h1>💎 Lucky Mines!</h1>
+  <h1>💎 Lucky Mines</h1>
 
   <div class="stats">
     💰 Credits: <span id="credits">1000</span> |
-    📈 Multiplier: <strong>x<span id="multiplier">1.0</span></strong>
+    📈 Multiplier: <strong>x<span id="multiplier">1.0</span></strong><br>
+    🏆 All-Time High: <span id="allTimeHigh">1000</span>
   </div>
 
   <!-- Bomb slider -->
@@ -115,12 +116,6 @@
   <div id="payoutMessage" class="payout-message"></div>
 
   <div id="fallingContainer" class="falling-container"></div>
-
-
-<!--wverything above this is html-->
-
-
-<!--everything under is javascript mb lol-->
 
   <script>
     const grid = document.getElementById('grid');
@@ -149,6 +144,10 @@
     let revealedTiles = 0;
     let bombCount = parseInt(bombSlider.value);
     let multiplierStep = 0.1;
+
+    // ✅ Load saved all-time high score
+    let allTimeHigh = parseInt(localStorage.getItem('allTimeHigh')) || 1000;
+    document.getElementById("allTimeHigh").textContent = allTimeHigh;
 
     // Auto-pick state
     let selectionMode = false;
@@ -259,7 +258,6 @@
       }
     }
 
-    // ✅ NEW: reveal all after round ends
     function revealAllTiles() {
       tiles.forEach((tile, i) => {
         if (!tile.classList.contains('diamond') && !tile.classList.contains('bomb')) {
@@ -274,7 +272,6 @@
       });
     }
 
-    // ✅ NEW: delay after round
     function endRoundDelay() {
       revealAllTiles();
       disableControls(true);
@@ -291,23 +288,32 @@
       selectModeBtn.disabled = state;
     }
 
+    function updateHighScore() {
+      if (credits > allTimeHigh) {
+        allTimeHigh = credits;
+        document.getElementById("allTimeHigh").textContent = allTimeHigh;
+        localStorage.setItem("allTimeHigh", allTimeHigh);
+      }
+    }
+
     function loseRound() {
       gameActive = false;
       cashOutBtn.disabled = true;
       payoutMsg.textContent = `💥 BOOM! You lost ${bet} credits.`;
       spawnFalling("💣", 15);
-      endRoundDelay(); // ✅ wait before next round
+      endRoundDelay();
     }
 
     function winRound() {
       const payout = Math.floor(bet * multiplier);
       credits += payout;
       creditsEl.textContent = credits;
+      updateHighScore(); // ✅ update after win
       payoutMsg.textContent = `🎉 You cleared all diamonds & won ${payout} credits!`;
       spawnFalling("💵", 20);
       gameActive = false;
       cashOutBtn.disabled = true;
-      endRoundDelay(); // ✅ wait before next round
+      endRoundDelay();
     }
 
     function cashOut() {
@@ -315,17 +321,19 @@
       const payout = Math.floor(bet * multiplier);
       credits += payout;
       creditsEl.textContent = credits;
+      updateHighScore(); // ✅ update after cash out
       payoutMsg.textContent = `💵 Cashed out for ${payout} credits (x${multiplier.toFixed(1)})`;
       spawnFalling("💵", 15);
       gameActive = false;
       cashOutBtn.disabled = true;
-      endRoundDelay(); // ✅ wait before next round
+      endRoundDelay();
     }
 
     function replenishCredits() {
       if (credits < 1000) {
         credits = 1000;
         creditsEl.textContent = credits;
+        updateHighScore(); // just in case it’s new high
         alert("✅ Credits replenished back to 1000!");
       } else alert("You still have enough credits!");
     }
